@@ -1,0 +1,13 @@
+aiosqlite==0.22.1
+anyio==4.12.1
+certifi==2026.1.4
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.11
+pyaes==1.6.1
+pyasn1==0.6.2
+python-dotenv==1.2.1
+python-telegram-bot==21.6
+rsa==4.9.1
+Telethon==1.42.0
