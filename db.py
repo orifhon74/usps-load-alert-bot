@@ -1,4 +1,5 @@
 import os
+import time
 import aiosqlite
 
 DB_PATH = os.getenv("DB_PATH", "/data/prefs.db")
@@ -22,7 +23,8 @@ async def init_db():
             from_scope TEXT NOT NULL DEFAULT 'first2'  -- 'first2' or 'any'
         )
         """)
-        # Multiple FROM points
+
+        # Multiple Origin points
         await db.execute("""
         CREATE TABLE IF NOT EXISTS user_from_points (
             user_id INTEGER NOT NULL,
@@ -31,7 +33,8 @@ async def init_db():
             PRIMARY KEY (user_id, city, state)
         )
         """)
-        # TO state list (used only if to_all=0)
+
+        # Destination state list (used only if to_all=0)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS user_to_states (
             user_id INTEGER NOT NULL,
@@ -39,6 +42,7 @@ async def init_db():
             PRIMARY KEY (user_id, state)
         )
         """)
+
         await db.commit()
 
 
@@ -173,7 +177,7 @@ async def get_all_configs():
       {
         user_id, to_all, from_scope, from_points(set of (city,state)), to_states(set)
       }
-    Only includes users with at least one FROM point.
+    Only includes users with at least one Origin point.
     """
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT user_id, to_all, from_scope FROM user_config")
