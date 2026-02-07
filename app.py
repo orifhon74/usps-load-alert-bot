@@ -88,7 +88,7 @@ def format_user_list(view: dict) -> str:
 
     return (
         f"Origin points ({len(origins)}):\n{origin_disp}\n\n"
-        f"Origin matching: {scope}\n"
+        # f"Origin matching: {scope}\n"
         f"Destination states: {dest_disp}"
     )
 
