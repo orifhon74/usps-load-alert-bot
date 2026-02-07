@@ -1,5 +1,4 @@
 import os
-import time
 import aiosqlite
 
 DB_PATH = os.getenv("DB_PATH", "/data/prefs.db")
@@ -15,18 +14,17 @@ def norm_state(st: str) -> str:
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
-        # Basic config per user
+        # Keep user_config minimal. (If your old DB already has from_scope, that's fine; we just ignore it.)
         await db.execute("""
         CREATE TABLE IF NOT EXISTS user_config (
             user_id INTEGER PRIMARY KEY,
-            to_all INTEGER NOT NULL DEFAULT 0,
-            from_scope TEXT NOT NULL DEFAULT 'first2'  -- 'first2' or 'any'
+            to_all INTEGER NOT NULL DEFAULT 0
         )
         """)
 
-        # Multiple Origin points
+        # Origin points by exact city+state
         await db.execute("""
-        CREATE TABLE IF NOT EXISTS user_from_points (
+        CREATE TABLE IF NOT EXISTS user_origin_points (
             user_id INTEGER NOT NULL,
             city TEXT NOT NULL,
             state TEXT NOT NULL,
@@ -34,9 +32,18 @@ async def init_db():
         )
         """)
 
+        # Origin states (match if FIRST stop state is in this list)
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS user_origin_states (
+            user_id INTEGER NOT NULL,
+            state TEXT NOT NULL,
+            PRIMARY KEY (user_id, state)
+        )
+        """)
+
         # Destination state list (used only if to_all=0)
         await db.execute("""
-        CREATE TABLE IF NOT EXISTS user_to_states (
+        CREATE TABLE IF NOT EXISTS user_destination_states (
             user_id INTEGER NOT NULL,
             state TEXT NOT NULL,
             PRIMARY KEY (user_id, state)
@@ -49,13 +56,14 @@ async def init_db():
 async def ensure_user(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO user_config (user_id, to_all, from_scope) VALUES (?, 0, 'first2')",
+            "INSERT OR IGNORE INTO user_config (user_id, to_all) VALUES (?, 0)",
             (user_id,),
         )
         await db.commit()
 
 
-async def add_from_point(user_id: int, city: str, st: str):
+# ---------- Origin (city+state) ----------
+async def add_origin_point(user_id: int, city: str, st: str):
     await ensure_user(user_id)
     city = norm_city(city)
     st = norm_state(st)
@@ -63,31 +71,64 @@ async def add_from_point(user_id: int, city: str, st: str):
         raise ValueError("State must be 2 letters (e.g. OH).")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO user_from_points (user_id, city, state) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO user_origin_points (user_id, city, state) VALUES (?, ?, ?)",
             (user_id, city, st),
         )
         await db.commit()
 
 
-async def remove_from_point(user_id: int, city: str, st: str):
+async def remove_origin_point(user_id: int, city: str, st: str):
     await ensure_user(user_id)
     city = norm_city(city)
     st = norm_state(st)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "DELETE FROM user_from_points WHERE user_id=? AND city=? AND state=?",
+            "DELETE FROM user_origin_points WHERE user_id=? AND city=? AND state=?",
             (user_id, city, st),
         )
         await db.commit()
 
 
-async def clear_from_points(user_id: int):
+async def clear_origin_points(user_id: int):
     await ensure_user(user_id)
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM user_from_points WHERE user_id=?", (user_id,))
+        await db.execute("DELETE FROM user_origin_points WHERE user_id=?", (user_id,))
         await db.commit()
 
 
+# ---------- Origin (states) ----------
+async def add_origin_state(user_id: int, st: str):
+    await ensure_user(user_id)
+    st = norm_state(st)
+    if len(st) != 2:
+        raise ValueError("State must be 2 letters (e.g. OH).")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO user_origin_states (user_id, state) VALUES (?, ?)",
+            (user_id, st),
+        )
+        await db.commit()
+
+
+async def remove_origin_state(user_id: int, st: str):
+    await ensure_user(user_id)
+    st = norm_state(st)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM user_origin_states WHERE user_id=? AND state=?",
+            (user_id, st),
+        )
+        await db.commit()
+
+
+async def clear_origin_states(user_id: int):
+    await ensure_user(user_id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM user_origin_states WHERE user_id=?", (user_id,))
+        await db.commit()
+
+
+# ---------- Destination ----------
 async def set_to_all(user_id: int, enabled: bool):
     await ensure_user(user_id)
     async with aiosqlite.connect(DB_PATH) as db:
@@ -98,76 +139,70 @@ async def set_to_all(user_id: int, enabled: bool):
         await db.commit()
 
 
-async def add_to_state(user_id: int, st: str):
+async def add_destination_state(user_id: int, st: str):
     await ensure_user(user_id)
     st = norm_state(st)
     if len(st) != 2:
         raise ValueError("State must be 2 letters (e.g. CO).")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "INSERT OR IGNORE INTO user_to_states (user_id, state) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO user_destination_states (user_id, state) VALUES (?, ?)",
             (user_id, st),
         )
         await db.commit()
 
 
-async def remove_to_state(user_id: int, st: str):
+async def remove_destination_state(user_id: int, st: str):
     await ensure_user(user_id)
     st = norm_state(st)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "DELETE FROM user_to_states WHERE user_id=? AND state=?",
+            "DELETE FROM user_destination_states WHERE user_id=? AND state=?",
             (user_id, st),
         )
         await db.commit()
 
 
-async def clear_to_states(user_id: int):
+async def clear_destination_states(user_id: int):
     await ensure_user(user_id)
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM user_to_states WHERE user_id=?", (user_id,))
+        await db.execute("DELETE FROM user_destination_states WHERE user_id=?", (user_id,))
         await db.commit()
 
 
-async def set_from_scope(user_id: int, scope: str):
-    await ensure_user(user_id)
-    scope = scope.lower().strip()
-    if scope not in ("first2", "any"):
-        raise ValueError("Scope must be: first2 or any")
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE user_config SET from_scope=? WHERE user_id=?",
-            (scope, user_id),
-        )
-        await db.commit()
-
-
+# ---------- Views ----------
 async def get_user_view(user_id: int):
     await ensure_user(user_id)
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
-            "SELECT to_all, from_scope FROM user_config WHERE user_id=?",
+            "SELECT to_all FROM user_config WHERE user_id=?",
             (user_id,),
         )
-        to_all, from_scope = await cur.fetchone()
+        (to_all,) = await cur.fetchone()
 
         cur2 = await db.execute(
-            "SELECT city, state FROM user_from_points WHERE user_id=? ORDER BY state, city",
+            "SELECT city, state FROM user_origin_points WHERE user_id=? ORDER BY state, city",
             (user_id,),
         )
-        from_points = await cur2.fetchall()
+        origin_points = await cur2.fetchall()
 
         cur3 = await db.execute(
-            "SELECT state FROM user_to_states WHERE user_id=? ORDER BY state",
+            "SELECT state FROM user_origin_states WHERE user_id=? ORDER BY state",
             (user_id,),
         )
-        to_states = [r[0] for r in await cur3.fetchall()]
+        origin_states = [r[0] for r in await cur3.fetchall()]
+
+        cur4 = await db.execute(
+            "SELECT state FROM user_destination_states WHERE user_id=? ORDER BY state",
+            (user_id,),
+        )
+        dest_states = [r[0] for r in await cur4.fetchall()]
 
     return {
         "to_all": bool(to_all),
-        "from_scope": from_scope,
-        "from_points": [(c, s) for c, s in from_points],
-        "to_states": to_states,
+        "origin_points": [(c, s) for c, s in origin_points],
+        "origin_states": origin_states,
+        "destination_states": dest_states,
     }
 
 
@@ -175,38 +210,53 @@ async def get_all_configs():
     """
     Returns list of dicts:
       {
-        user_id, to_all, from_scope, from_points(set of (city,state)), to_states(set)
+        user_id,
+        to_all,
+        origin_points(set of (CITY_UPPER, ST)),
+        origin_states(set of ST),
+        destination_states(set of ST)
       }
-    Only includes users with at least one Origin point.
+
+    Only includes users with at least one origin rule (point or state).
     """
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT user_id, to_all, from_scope FROM user_config")
+        cur = await db.execute("SELECT user_id, to_all FROM user_config")
         cfg_rows = await cur.fetchall()
 
-        cur2 = await db.execute("SELECT user_id, city, state FROM user_from_points")
-        from_rows = await cur2.fetchall()
+        cur2 = await db.execute("SELECT user_id, city, state FROM user_origin_points")
+        op_rows = await cur2.fetchall()
 
-        cur3 = await db.execute("SELECT user_id, state FROM user_to_states")
-        to_rows = await cur3.fetchall()
+        cur3 = await db.execute("SELECT user_id, state FROM user_origin_states")
+        os_rows = await cur3.fetchall()
 
-    from_map = {}
-    for user_id, city, st in from_rows:
-        from_map.setdefault(user_id, set()).add((city, st))
+        cur4 = await db.execute("SELECT user_id, state FROM user_destination_states")
+        ds_rows = await cur4.fetchall()
 
-    to_map = {}
-    for user_id, st in to_rows:
-        to_map.setdefault(user_id, set()).add(st)
+    op_map = {}
+    for user_id, city, st in op_rows:
+        op_map.setdefault(user_id, set()).add((city, st))
+
+    os_map = {}
+    for user_id, st in os_rows:
+        os_map.setdefault(user_id, set()).add(st)
+
+    ds_map = {}
+    for user_id, st in ds_rows:
+        ds_map.setdefault(user_id, set()).add(st)
 
     out = []
-    for user_id, to_all, from_scope in cfg_rows:
-        fps = from_map.get(user_id, set())
-        if not fps:
+    for user_id, to_all in cfg_rows:
+        origin_points = op_map.get(user_id, set())
+        origin_states = os_map.get(user_id, set())
+
+        if not origin_points and not origin_states:
             continue
+
         out.append({
             "user_id": user_id,
             "to_all": bool(to_all),
-            "from_scope": from_scope,
-            "from_points": fps,
-            "to_states": to_map.get(user_id, set()),
+            "origin_points": origin_points,
+            "origin_states": origin_states,
+            "destination_states": ds_map.get(user_id, set()),
         })
     return out
