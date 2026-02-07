@@ -45,7 +45,7 @@ LOC_RE = re.compile(r"📍\s*([A-Z][A-Z\s\.\'-]+?),\s*([A-Z]{2})")
 # -----------------------
 # Buttons (UI)
 # -----------------------
-BTN_ADD_ORIGIN_CITY = "➕ Add Origin (City)"
+BTN_ADD_ORIGIN_CITY = "➕ Add Origin (City and State)"
 BTN_ADD_ORIGIN_STATE = "➕ Add Origin (State)"
 BTN_CLEAR_ORIGINS = "🧹 Clear Origins"
 
@@ -126,9 +126,9 @@ def format_user_list(view: dict) -> str:
         f"Origin cities ({len(origin_points)}):\n{op_disp}\n\n"
         f"Origin states ({len(origin_states)}): {os_disp}\n\n"
         f"Destination states: {dest_disp}\n\n"
-        f"Matching rule:\n"
-        f"- Origin = FIRST stop only\n"
-        f"- Destination = LAST stop only"
+        # f"Matching rule:\n"
+        # f"- Origin = FIRST stop only\n"
+        # f"- Destination = LAST stop only"
     )
 
 
