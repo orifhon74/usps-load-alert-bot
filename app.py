@@ -38,6 +38,34 @@ if not API_ID or not API_HASH or not CHANNEL_USERNAME:
 SESSION_PATH = os.getenv("SESSION_PATH", "/data/listener_session")
 tele_client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
 
+# -----------------------
+# Allowlist (PRIVATE BOT)
+# -----------------------
+ALLOWED_USER_IDS_RAW = os.getenv("ALLOWED_USER_IDS", "").strip()
+ALLOWED_USER_IDS = set()
+
+if ALLOWED_USER_IDS_RAW:
+    for x in ALLOWED_USER_IDS_RAW.split(","):
+        x = x.strip()
+        if x:
+            try:
+                ALLOWED_USER_IDS.add(int(x))
+            except ValueError:
+                raise RuntimeError(f"Invalid ALLOWED_USER_IDS entry: '{x}'. Must be integers.")
+
+def is_allowed(user_id: int) -> bool:
+    # If env var is empty => allow everyone (dev mode)
+    if not ALLOWED_USER_IDS:
+        return True
+    return user_id in ALLOWED_USER_IDS
+
+async def require_allowed(update: Update) -> bool:
+    uid = update.effective_user.id
+    if not is_allowed(uid):
+        await update.message.reply_text("⛔ This bot is private. You are not authorized to use it.")
+        return False
+    return True
+
 # Parse: 📍 CITY, ST (2+ times)
 LOC_RE = re.compile(r"📍\s*([A-Z][A-Z\s\.\'-]+?),\s*([A-Z]{2})")
 
@@ -126,9 +154,6 @@ def format_user_list(view: dict) -> str:
         f"Origin cities ({len(origin_points)}):\n{op_disp}\n\n"
         f"Origin states ({len(origin_states)}): {os_disp}\n\n"
         f"Destination states: {dest_disp}\n\n"
-        # f"Matching rule:\n"
-        # f"- Origin = FIRST stop only\n"
-        # f"- Destination = LAST stop only"
     )
 
 
@@ -156,6 +181,9 @@ def origin_destination(stops):
 # Commands (optional power users)
 # -----------------------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_allowed(update):
+        return
+
     msg = (
         "USPS Load Alerts\n\n"
         "Use the buttons below.\n"
@@ -165,11 +193,27 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def list_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_allowed(update):
+        return
+
     view = await get_user_view(update.effective_user.id)
     await update.message.reply_text(format_user_list(view), reply_markup=MAIN_KB)
 
 
+async def whoami_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Useful for debugging/allowlist collection.
+    (This still respects allowlist, so only allowed users can see it.)
+    """
+    if not await require_allowed(update):
+        return
+    await update.message.reply_text(f"Your Telegram user ID is: {update.effective_user.id}", reply_markup=MAIN_KB)
+
+
 async def testlast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_allowed(update):
+        return
+
     try:
         n = int(context.args[0]) if context.args else 20
     except ValueError:
@@ -232,6 +276,9 @@ async def testlast_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Button flows
 # -----------------------
 async def menu_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_allowed(update):
+        return
+
     msg = (
         "How to use:\n"
         f"- Tap {BTN_ADD_ORIGIN_CITY} then type: City, ST (example: Cincinnati, OH)\n"
@@ -244,6 +291,9 @@ async def menu_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_free_text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_allowed(update):
+        return
+
     awaiting = context.user_data.get("awaiting")
     if not awaiting:
         return
@@ -292,6 +342,9 @@ async def handle_free_text_input(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def handle_menu_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_allowed(update):
+        return
+
     text = (update.message.text or "").strip()
     uid = update.effective_user.id
 
@@ -366,6 +419,10 @@ async def on_new_message(event):
     alert = f"🚚 LOAD MATCH\n\n{text}"
 
     for cfg in configs:
+        # Hard block any unauthorized user even if they somehow exist in DB
+        if not is_allowed(cfg["user_id"]):
+            continue
+
         # Origin match: FIRST stop only
         origin_ok = ((o_city, o_state) in cfg["origin_points"]) or (o_state in cfg["origin_states"])
         if not origin_ok:
@@ -396,6 +453,7 @@ async def main():
     bot_app.add_handler(CommandHandler("start", start_cmd))
     bot_app.add_handler(CommandHandler("list", list_cmd))
     bot_app.add_handler(CommandHandler("testlast", testlast_cmd))
+    bot_app.add_handler(CommandHandler("whoami", whoami_cmd))
 
     # UI handlers (typed input first, then menu buttons)
     bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_free_text_input), group=0)
