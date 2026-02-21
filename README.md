@@ -122,3 +122,9 @@ It operates by monitoring publicly available Telegram route postings.
 
 Access is currently private.
 If interested, contact the developer directly.
+
+⸻
+
+🧑‍💻 Author
+
+Built and deployed by Orifkhon Kilichev
